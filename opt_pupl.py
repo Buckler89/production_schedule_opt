@@ -1,6 +1,7 @@
 import pandas as pd
 from pulp import LpProblem, LpMinimize, LpVariable, LpInteger, lpSum
 from itertools import chain
+from itertools import product
 from pandas.tseries.holiday import USFederalHolidayCalendar as Calendar
 from pandas.tseries.offsets import CustomBusinessDay
 import numpy as np
@@ -39,8 +40,7 @@ business_days_6d = len(pd.date_range(start=f'{year}-01-01', end=f'{year}-12-31',
 business_days_7d = len(pd.date_range(start=f'{year}-01-01', end=f'{year}-12-31', freq=custom_business_day_7d))
 
 
-from pulp import LpProblem, LpVariable, LpMinimize, LpInteger, lpSum
-from itertools import product
+
 
 # Preparazione dei dati
 stampi = data['Stampo'].unique()
