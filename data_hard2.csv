@@ -1,6 +1,0 @@
- ; Prodotto;   Stampo;          Pressa;    Velocità di produzione;
-0;      c1;      A54;              [1,2];                       100
-1;      c2;      A54;              [1,2];                       100
-2;      c1;      A50;              [2];                         200
-3;      c3;      A49;              [1];                         80
-4;      c4;      A82;              [2];                         60

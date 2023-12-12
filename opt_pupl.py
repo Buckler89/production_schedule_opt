@@ -9,30 +9,33 @@ from pulp import PULP_CBC_CMD
 import os
 import plotly.express as px
 import itertools
+import datetime
+import holidays
+from datetime import datetime, timedelta
 
-file_path = "C:\\Users\\buckler\Downloads\chiarella.csv"
-file_path2 = "C:\\Users\\buckler\Downloads\chiarella - Sheet1.csv"
-df = pd.read_csv(file_path, sep=',', skipinitialspace=True)
-data = pd.read_csv(file_path2, sep=',', skipinitialspace=True)
 
-df['Pressa'] = df['Pressa'].apply(lambda x: eval(x))
-df = df.groupby('Stampo', as_index=False).agg({'Geometria': 'first',  'Pressa': 'first', 'Giorni produzione': 'sum', })
-# df["Giorni produzione ceil"] = (df['Giorni produzione']).apply(np.ceil).astype(int)
-df['presses_length'] = df['Pressa'].apply(len)
+# file_path = "C:\\Users\\buckler\Downloads\chiarella.csv"
+# df = pd.read_csv(file_path, sep=',', skipinitialspace=True)
+file_path = "data/chiarella - Sheet1.csv"
+data = pd.read_csv(file_path, sep=',', skipinitialspace=True)
+
+# df['Pressa'] = df['Pressa'].apply(lambda x: eval(x))
+# df = df.groupby('Stampo', as_index=False).agg({'Geometria': 'first',  'Pressa': 'first', 'Giorni produzione': 'sum', })
+# # df["Giorni produzione ceil"] = (df['Giorni produzione']).apply(np.ceil).astype(int)
+# df['presses_length'] = df['Pressa'].apply(len)
 
 data = data.groupby('Stampo', as_index=False).agg({'Pressa': 'first', 'Giorni produzione': 'sum', })
-# todo indaga perche se metto grouby cambia sia risultato che tempo di run
-# df["Giorni produzione ceil"] = (df['Giorni produzione']).apply(np.ceil).astype(int)
 
 # Anno di riferimento per il calcolo (assumendo l'anno corrente)
-year = 2023
+year = 2024
+base_date = datetime(year, 1, 1)
 
 # Creazione di un calendario personalizzato che esclude i giorni festivi standard
 calendar = Calendar()
-holidays = calendar.holidays(start=f'{year}-01-01', end=f'{year}-12-31')
-custom_business_day_5d = CustomBusinessDay(holidays=holidays)
-custom_business_day_6d = CustomBusinessDay(holidays=holidays, weekmask='Mon Tue Wed Thu Fri Sat')
-custom_business_day_7d = CustomBusinessDay(holidays=holidays, weekmask='Mon Tue Wed Thu Fri Sat Sun')
+holidays_var = calendar.holidays(start=f'{year}-01-01', end=f'{year}-12-31')
+custom_business_day_5d = CustomBusinessDay(holidays=holidays_var)
+custom_business_day_6d = CustomBusinessDay(holidays=holidays_var, weekmask='Mon Tue Wed Thu Fri Sat')
+custom_business_day_7d = CustomBusinessDay(holidays=holidays_var, weekmask='Mon Tue Wed Thu Fri Sat Sun')
 
 # Calcolo dei giorni lavorativi per ogni configurazione (5, 6, 7 giorni alla settimana)
 business_days_5d = len(pd.date_range(start=f'{year}-01-01', end=f'{year}-12-31', freq=custom_business_day_5d))
@@ -130,7 +133,7 @@ for i in stampi:
 
 
 # Impostazione del time limit e del gap di ottimalità
-solver = PULP_CBC_CMD(timeLimit=30, gapRel=0.01)  # 600 secondi e 1% di gap
+solver = PULP_CBC_CMD(timeLimit=60, gapRel=0.01)  # 600 secondi e 1% di gap
 
 # Risoluzione del modello corretto
 model.solve(solver)
@@ -141,7 +144,6 @@ assegnazioni = [(i, j) for i in stampi for j in unique_presses if x[i][j].varVal
 
 # Preparazione dei dati per Plotly, assicurandosi che tutti i valori siano coerenti come stringhe
 gantt_task = []
-from datetime import datetime, timedelta
 
 # Conversione delle assegnazioni in un formato utilizzabile
 assegnazioni_df = pd.DataFrame(assegnazioni, columns=['Stampo', 'Pressa'])
@@ -151,7 +153,6 @@ assegnazioni_df = assegnazioni_df.sort_values(by=['Pressa', 'Stampo'])
 # Calcolo delle date di inizio e fine per ciascun stampo
 date_inizio = {}
 date_fine = {}
-base_date = datetime(2023, 1, 1)
 
 for index, row in assegnazioni_df.iterrows():
     pressa = row['Pressa']
@@ -186,10 +187,6 @@ fig.show()
 
 
 
-
-import datetime
-import numpy as np
-import holidays
 it_holidays = holidays.country_holidays('IT', subdiv='AP', years=2023)
 analysis_types = [
     {
@@ -228,9 +225,9 @@ def calculate_end_date(start_date, duration, h, work_day_week):
             duration -= 1
         else:
             additional_days += 1
-        current_date += datetime.timedelta(days=1)
+        current_date += timedelta(days=1)
 
-    return current_date, datetime.timedelta(days=additional_days)
+    return current_date, timedelta(days=additional_days)
 
 # # Esempio di utilizzo
 # start_date = datetime.date(2023, 1, 1) # Data di inizio
