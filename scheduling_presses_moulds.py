@@ -15,6 +15,7 @@ import itertools
 import datetime
 import holidays
 from datetime import datetime, timedelta
+import json
 
 file_path = "data/chiarella - Sheet1.csv"
 data = pd.read_csv(file_path, sep=',', skipinitialspace=True)
@@ -148,17 +149,34 @@ z = LpVariable("max_production_time", lowBound=0)
 #     model += diff >= total_time_per_press[pressa2] - total_time_per_press[pressa1]
 # Objective function: Minimize the maximum production time
 # model += z + sum(differenze)
-model += z + penalty_6d * lpSum(y[j][6] for j in unique_presses) + penalty_7d * lpSum(y[j][7] for j in unique_presses)
-
+model += (z +
+        # sum(differenze) +
+          penalty_6d * lpSum(y[j][6] for j in unique_presses) + penalty_7d * lpSum(y[j][7] for j in unique_presses))
+# model += z <= 500
 # Add constraints to ensure only one schedule is chosen for each press
 for j in unique_presses:
     model += lpSum(y[j][d] for d in giorni_per_stampo.keys()) == 1
 
+# Introduzione della nuova variabile decisionale
+xy = LpVariable.dicts("Prod_var", (stampi, unique_presses, giorni_per_stampo.keys()), 0, 1, LpInteger)
+
+# Aggiunta dei vincoli per linearizzare il prodotto delle variabili
+for i in stampi:
+    for j in unique_presses:
+        for w in giorni_per_stampo.keys():
+            model += xy[i][j][w] <= x[i][j]
+            model += xy[i][j][w] <= y[j][w]
+            model += xy[i][j][w] >= x[i][j] + y[j][w] - 1
 # The production time for each press is the sum of times for the jobs assigned to it
 for j in unique_presses:
+    constraints_for_press_j = []
     for w in giorni_per_stampo.keys():
-        constraints_for_press_j = [giorni_per_stampo[w][i] * x[i][j] for i in stampi]
-        model += total_time_per_press[j] == lpSum(constraints_for_press_j)
+        constraints_for_press_j += [giorni_per_stampo[w][i] *
+                                    xy[i][j][w]
+                                    # x[i][j]
+                                    for i in stampi]
+
+    model += total_time_per_press[j] == lpSum(constraints_for_press_j)
 
 # The production time for each press should be less than or equal to the maximum production time
 for j in unique_presses:
@@ -193,40 +211,53 @@ solver_list = pl.listSolvers(onlyAvailable=True)
 solver = PULP_CBC_CMD(timeLimit=60, gapRel=0.001)  # 600 secondi e 1% di gap
 # solver = CPLEX_CMD(timeLimit=60, gapRel=0.001)  # 600 secondi e 1% di gap
 
-# Risoluzione del modello corretto
-model.solve(solver)
-# print(model)
+if not os.path.exists(os.path.join("results_pupl", f"results.csv")):
+    # Risoluzione del modello corretto
+    model.solve(solver)
+    # print(model)
 
 
 
 
 
-# Estrazione dei risultati corretti
-assegnazioni = [(i, j) for i in stampi for j in unique_presses if x[i][j].varValue > 0]
-# Estrazione delle informazioni sulle giornate lavorative per ogni pressa
-# giorni_lavorativi_per_pressa = {j: d for j in unique_presses for d in [5, 6, 7] if y[j][d].varValue > 0}
-#  Estrazione delle informazioni sui giorni lavorativi per ogni pressa in base al valore massimo
-giorni_lavorativi_per_pressa = {}
-for j in unique_presses:
-    max_val = 0
-    giorni_opt = 0
-    for d in [5, 6, 7]:
-        if y[j][d].varValue > max_val:
-            max_val = y[j][d].varValue
-            giorni_opt = d
-    giorni_lavorativi_per_pressa[j] = giorni_opt
+    # Estrazione dei risultati corretti
+    assegnazioni = [(i, j) for i in stampi for j in unique_presses if x[i][j].varValue > 0]
+    # Estrazione delle informazioni sulle giornate lavorative per ogni pressa
+    # giorni_lavorativi_per_pressa = {j: d for j in unique_presses for d in [5, 6, 7] if y[j][d].varValue > 0}
+    #  Estrazione delle informazioni sui giorni lavorativi per ogni pressa in base al valore massimo
+    giorni_lavorativi_per_pressa = {}
+    for j in unique_presses:
+        max_val = 0
+        giorni_opt = 0
+        print(f"Pressa {j}: {y[j][5].varValue}, {y[j][6].varValue}, {y[j][7].varValue}")
+        for d in [5, 6, 7]:
+            if y[j][d].varValue > max_val:
+                max_val = y[j][d].varValue
+                giorni_opt = d
+        giorni_lavorativi_per_pressa[j] = giorni_opt
 
-# Stampa dei risultati
-for pressa, giorni in giorni_lavorativi_per_pressa.items():
-    print(f"La pressa {pressa} lavora {giorni} giorni a settimana")
+    # Stampa dei risultati
+    for pressa, giorni in giorni_lavorativi_per_pressa.items():
+        print(f"La pressa {pressa} lavora {giorni} giorni a settimana")
 
-# Preparazione dei dati per Plotly, assicurandosi che tutti i valori siano coerenti come stringhe
-gantt_task = []
 
-# Conversione delle assegnazioni in un formato utilizzabile
-assegnazioni_df = pd.DataFrame(assegnazioni, columns=['Stampo', 'Pressa'])
-assegnazioni_df['Durata'] = assegnazioni_df['Stampo'].map(giorni_per_stampo)
-assegnazioni_df = assegnazioni_df.sort_values(by=['Pressa', 'Stampo'])
+
+    # Conversione delle assegnazioni in un formato utilizzabile
+    assegnazioni_df = pd.DataFrame(assegnazioni, columns=['Stampo', 'Pressa'])
+    # determinazione della durata di ciascuno stampo in base all'assegnazione dei giorni lavoriativi per la pressa e lo specifico stampo
+    assegnazioni_df['Durata'] = assegnazioni_df.apply(lambda x: giorni_per_stampo[giorni_lavorativi_per_pressa[x['Pressa']]][x['Stampo']], axis=1)
+    assegnazioni_df = assegnazioni_df.sort_values(by=['Pressa', 'Stampo'])
+    assegnazioni_df["work_day_per_week"] = assegnazioni_df.apply(lambda x: giorni_lavorativi_per_pressa[x['Pressa']], axis=1)
+    assegnazioni_df.to_csv(os.path.join("results_pupl", f"results.csv"))
+    #save giorni_lavorativi_per_pressa
+    with open(os.path.join("results_pupl", f"giorni_lavorativi_per_pressa.json"), "w") as f:
+        json.dump(giorni_lavorativi_per_pressa, f)
+else:
+    assegnazioni_df = pd.read_csv(os.path.join("results_pupl", f"results.csv"))
+    assegnazioni_df["Pressa"] = assegnazioni_df["Pressa"].astype(str)
+    # load giorni_lavorativi_per_pressa
+    with open(os.path.join("results_pupl", f"giorni_lavorativi_per_pressa.json"), "r") as f:
+        giorni_lavorativi_per_pressa = json.load(f)
 
 # Calcolo delle date di inizio e fine per ciascun stampo
 date_inizio = {}
@@ -247,46 +278,62 @@ for index, row in assegnazioni_df.iterrows():
     assegnazioni_df.at[index, 'Inizio'] = inizio
     assegnazioni_df.at[index, 'Fine'] = fine
 
-
+# Preparazione dei dati per Plotly, assicurandosi che tutti i valori siano coerenti come stringhe
+gantt_task = []
 for index, row in assegnazioni_df.iterrows():
+    giorni = giorni_lavorativi_per_pressa[row['Pressa']]
+    resource_name = "Pressa " + str(row['Pressa'])
+    # Formatta il nome della risorsa in base ai giorni di lavoro
+    if giorni == '7':
+        resource_name = f"<b>{resource_name}</b>"
+    elif giorni == '6':
+        # Usare un tag <span> per un grassetto più leggero (non sempre supportato)
+        resource_name = f"<span style='font-weight: 600;'>{resource_name}</span>"
+
     gantt_task.append(dict
         (
             Task=str(row['Stampo']),
             Start=row['Inizio'],#.strftime("%Y-%m-%d"),
             Finish=row['Fine'],#.strftime("%Y-%m-%d"),
-            Resource="Pressa " + str(row['Pressa']),
-            Mode=str(giorni_lavorativi_per_pressa[row['Pressa']]),
-            NDay=(row['Fine']-row['Inizio']).days
+            Resource=resource_name,
+            Mode=f"Giorni lavoro {giorni}",
+            NDay=(row['Fine']-row['Inizio']).days,
         )
     )
-
-fig = px.timeline(gantt_task, title="robot", x_start="Start", x_end="Finish", y="Resource", hover_name="Mode", color="Task")
+# order discendente element by Mode
+gantt_task = sorted(gantt_task, key=lambda x: x['Mode'])
+fig = px.timeline(gantt_task, title="Schedulazione Presse", x_start="Start", x_end="Finish", y="Resource",
+                  # hover_name="Mode",
+                  # color="Task",
+                  hover_name="Task",
+                  color="Mode",
+                  )
 fig.update_xaxes(tickformat="%d-%m-%Y")
 
 fig.show()
 
 
+do_plot = False
+if do_plot:
+    for analysis_type in analysis_types:
 
 
-for analysis_type in analysis_types:
+        gantt_task_mod = sorted(gantt_task, key=lambda x: x['Start'])
+        for task in gantt_task_mod:
+        #     task['Finish'] = calculte_end_date(task['Start'],  task['Finish'] - task['Start'], holidays)
+            extra_duration, additional_days, _ = calculate_end_date((task['Finish'] - task['Start']).days, task['Start'], analysis_type["holydays"], work_day_week=analysis_type["work_day_per_week"])
+            resource_events_indexes = [i for i, gt in enumerate(gantt_task_mod) if gt["Resource"] == task["Resource"] and gt["Start"] >= task["Start"]]
+            for i, idx in enumerate(resource_events_indexes):
+                gantt_task_mod[idx]['Finish'] += additional_days
+                if i > 0:
+                    gantt_task_mod[idx]['Start'] += additional_days
+                    # gantt_task[idx]['Finish'] += additional_days
+            # modify_event(gantt_task, task_to_modify=task["Task"], resource=task["Resource"], extra_duration=additional_days)
 
+        df = pd.DataFrame(gantt_task_mod)
+        df.to_csv(os.path.join("results_pupl", f"{analysis_type['title']}.csv"))
 
-    gantt_task_mod = sorted(gantt_task, key=lambda x: x['Start'])
-    for task in gantt_task_mod:
-    #     task['Finish'] = calculte_end_date(task['Start'],  task['Finish'] - task['Start'], holidays)
-        extra_duration, additional_days, _ = calculate_end_date((task['Finish'] - task['Start']).days, task['Start'], analysis_type["holydays"], work_day_week=analysis_type["work_day_per_week"])
-        resource_events_indexes = [i for i, gt in enumerate(gantt_task_mod) if gt["Resource"] == task["Resource"] and gt["Start"] >= task["Start"]]
-        for i, idx in enumerate(resource_events_indexes):
-            gantt_task_mod[idx]['Finish'] += additional_days
-            if i > 0:
-                gantt_task_mod[idx]['Start'] += additional_days
-                # gantt_task[idx]['Finish'] += additional_days
-        # modify_event(gantt_task, task_to_modify=task["Task"], resource=task["Resource"], extra_duration=additional_days)
+        fig = px.timeline(df, title=analysis_type["title"], x_start="Start", x_end="Finish", y="Resource", hover_name="NDay", color="Task")
+        fig.update_xaxes(tickformat="%d-%m-%Y")
 
-    df = pd.DataFrame(gantt_task_mod)
-    df.to_csv(os.path.join("results_pupl", f"{analysis_type['title']}.csv"))
-
-    fig = px.timeline(df, title=analysis_type["title"], x_start="Start", x_end="Finish", y="Resource", hover_name="NDay", color="Task")
-    fig.update_xaxes(tickformat="%d-%m-%Y")
-
-    fig.show()
+        fig.show()
