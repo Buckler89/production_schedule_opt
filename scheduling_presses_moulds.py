@@ -17,7 +17,7 @@ import holidays
 from datetime import datetime, timedelta
 import json
 
-file_path = "data/chiarella - Sheet1.csv"
+file_path = "data/dati-presse-tampi_V1.csv"
 data = pd.read_csv(file_path, sep=',', skipinitialspace=True)
 
 
